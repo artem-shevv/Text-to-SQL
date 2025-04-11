@@ -23,14 +23,15 @@ def setup_vanna():
     vn = MyVanna()
     # Подключение к PostgreSQL через секреты
     vn.connect_to_postgres(
-        host=st.secrets.database["host"],  # Обращение к вложенной структуре
+        host=st.secrets.postgres["host"],  # Обращение к вложенной структуре
         dbname=st.secrets.postgres["dbname"],
         user=st.secrets.postgres["user"],
         password=st.secrets.postgres["password"],
-        port=st.secrets.postgres["port"]
+        port=st.secrets.postgres["port"],
+        sslmode="require",  # Обязательно для Supabase
+        connect_timeout=5  # Рекомендуется для pooler
     )
     return vn
-
 
 @st.cache_data(show_spinner="Generating sample questions ...")
 def generate_questions_cached():
