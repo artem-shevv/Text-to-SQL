@@ -95,11 +95,11 @@ SELECT DISTINCT PL.PHONE_NUMBER
     JOIN PHONE_LIST PL ON PL.TE_NO = S.TE_NO
     WHERE ST.ST_NO = '54868-4585';
 
--- Кто преподавал мне "Машинное обучение"?
+-- Кто преподавал мне "machine learning"?
 SELECT T.FULL_NAME
     FROM SUBJECTS S
     JOIN TEACHERS T ON S.TE_NO = T.TE_NO
-    WHERE S.SUBJECT = 'Машинное обучение';   
+    WHERE S.SUBJECT = 'machine learning';   
 
 -- Где я проживаю согласно данным в системе?
 -- Где я живу?
@@ -285,7 +285,6 @@ SELECT C.DIR_NO, T.FULL_NAME
 -- Что я изучу за время обучения на своём направлении?
 -- Кто будет вести каждую дисциплину на каждом курсе моего обучения?
 WITH student_info AS (
-    -- Получаем информацию о студенте и его направлении подготовки
     SELECT 
         ST.ST_NO,
         G.ID_NO AS group_id,  

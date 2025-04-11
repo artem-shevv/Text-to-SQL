@@ -28,8 +28,8 @@ def setup_vanna():
         user=st.secrets.postgres["user"],
         password=st.secrets.postgres["password"],
         port=st.secrets.postgres["port"],
-        sslmode="require",  # Обязательно для Supabase
-        connect_timeout=5  # Рекомендуется для pooler
+        #sslmode="require",  # Обязательно для Supabase
+        #connect_timeout=5  # Рекомендуется для pooler
     )
     return vn
 
