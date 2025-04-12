@@ -1,6 +1,6 @@
 import streamlit as st
-from vanna.openai import OpenAI_Chat
-from vanna.vannadb import VannaDB_VectorStore
+from vanna.openai import OpenAI_Chat # type: ignore
+from vanna.vannadb import VannaDB_VectorStore # type: ignore
 
 class MyVanna(VannaDB_VectorStore, OpenAI_Chat):
     def __init__(self):

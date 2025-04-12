@@ -1,12 +1,13 @@
 import time
 import streamlit as st
+import pandas as pd
+from io import StringIO
 from vanna_calls import (
     generate_questions_cached,
     generate_sql_cached,
     run_sql_cached,
     generate_plotly_code_cached,
     generate_plot_cached,
-    generate_followup_cached,
     should_generate_chart_cached,
     is_sql_valid_cached,
     generate_summary_cached
@@ -23,13 +24,13 @@ st.sidebar.checkbox("Show Table", value=True, key="show_table")
 st.sidebar.checkbox("Show Plotly Code", value=True, key="show_plotly_code")
 st.sidebar.checkbox("Show Chart", value=True, key="show_chart")
 st.sidebar.checkbox("Show Summary", value=True, key="show_summary")
-st.sidebar.checkbox("Show Follow-up Questions", value=True, key="show_followup")
 
 # --- Reset chat ---
 if st.sidebar.button("Reset Chat", use_container_width=True):
     st.session_state.pop("chat_history", None)
     st.session_state.pop("my_question", None)
     st.session_state.pop("df", None)
+    st.session_state.pop("user_input", None)  # Reset the user input flag for ID check
 
 # --- Init chat history ---
 if "chat_history" not in st.session_state:
@@ -42,19 +43,45 @@ def set_question(question):
 
 st.title("Vanna AI")
 
-assistant_message_suggested = st.chat_message("assistant", avatar=avatar_url)
-if assistant_message_suggested.button("Click to show suggested questions"):
-    st.session_state["my_question"] = None
-    questions = generate_questions_cached()
-    for question in questions:
-        st.button(question, on_click=set_question, args=(question,))
+# --- Neutral questions ---
+NEUTRAL_QUESTIONS = [
+    "Сколько всего студентов обучается?",
+    "Сколько преподавателей работает в институте?",
+    "Сколько всего групп?",
+    "Сколько групп на каждом курсе?",
+    "Какие дисциплины ведёт каждый преподаватель?",
+    "Сколько студентов по каждой специальности?"
+]
+
+# --- Check for ID input based on keywords ---
+def check_for_id_input(user_input):
+    keywords = ["студент", "преподаватель", "учитель", "администратор"]
+    if any(keyword in user_input.lower() for keyword in keywords) and any(c.isdigit() for c in user_input):
+        return True
+    return False
+
+# --- Suggested Questions Section ---
+def show_suggested_questions():
+    assistant_message_suggested = st.chat_message("assistant", avatar=avatar_url)
+    if assistant_message_suggested.button("Click to show suggested questions"):
+        st.session_state["my_question"] = None
+        # If user input contains ID (check for keyword + digits), show real model questions
+        if "user_input" in st.session_state and check_for_id_input(st.session_state["user_input"]):
+            questions = generate_questions_cached()  # Use the model's questions
+        else:
+            questions = NEUTRAL_QUESTIONS  # Default neutral questions
+
+        for question in questions:
+            st.button(question, on_click=set_question, args=(question,))
 
 # --- Chat Input ---
-new_question = st.chat_input("Ask me a question about your data")
+new_question = st.chat_input("Задайте вопрос о ваших данных")
 
 if new_question:
     st.session_state["my_question"] = new_question
     st.session_state["df"] = None
+    # Store user input for future checks
+    st.session_state["user_input"] = new_question
 
 # --- Render chat history ---
 for entry in st.session_state.chat_history:
@@ -67,19 +94,19 @@ for entry in st.session_state.chat_history:
 
     if st.session_state.get("show_table", True) and entry.get("df") is not None:
         df = entry["df"]
+        
+        # Check if the dataframe has more than 10 rows
         if len(df) > 10:
-            assistant_msg.text("First 10 rows of data")
-            assistant_msg.dataframe(df.head(10))
+            assistant_msg.text("Displaying first 10 rows of data:")
+            assistant_msg.dataframe(df.head(10))  # Display first 10 rows with scroll
+            # Provide a download link for the full dataset
+            csv = df.to_csv(index=False)
+            st.download_button(label="Download Full Data", data=csv, file_name="full_data.csv", mime="text/csv")
         else:
             assistant_msg.dataframe(df)
 
     if st.session_state.get("show_summary", True) and entry.get("summary"):
         assistant_msg.text(entry["summary"])
-
-    if st.session_state.get("show_followup", True) and entry.get("followups"):
-        assistant_msg.text("Follow-up questions:")
-        for q in entry["followups"][:5]:
-            assistant_msg.button(q, on_click=set_question, args=(q,))
 
 # --- Обработка нового вопроса ---
 my_question = st.session_state.get("my_question", None)
@@ -125,8 +152,11 @@ if my_question:
         if st.session_state.get("show_table", True):
             assistant_msg = st.chat_message("assistant", avatar=avatar_url)
             if len(df) > 10:
-                assistant_msg.text("First 10 rows of data")
-                assistant_msg.dataframe(df.head(10))
+                assistant_msg.text("Displaying first 10 rows of data:")
+                assistant_msg.dataframe(df.head(10))  # Display first 10 rows with scroll
+                # Provide a download link for the full dataset
+                csv = df.to_csv(index=False)
+                st.download_button(label="Download Full Data", data=csv, file_name="full_data.csv", mime="text/csv")
             else:
                 assistant_msg.dataframe(df)
 
@@ -147,23 +177,15 @@ if my_question:
             if summary:
                 st.chat_message("assistant", avatar=avatar_url).text(summary)
 
-        # Follow-up
-        followups = []
-        if st.session_state.get("show_followup", True):
-            followups = generate_followup_cached(question=my_question, sql=sql, df=df)
-            if followups:
-                followup_msg = st.chat_message("assistant", avatar=avatar_url)
-                followup_msg.text("Follow-up questions:")
-                for q in followups[:5]:
-                    followup_msg.button(q, on_click=set_question, args=(q,))
-
         # Сохраняем всё в историю
         st.session_state.chat_history.append({
             "question": my_question,
             "sql": sql,
             "df": df,
-            "summary": summary,
-            "followups": followups
+            "summary": summary
         })
 
         st.session_state["my_question"] = None
+
+# --- Show suggested questions ---
+show_suggested_questions()
