@@ -38,11 +38,25 @@ def setup_vanna():
     )
     return vn
 
+
+def clean_question_text(q):
+    if not isinstance(q, str):
+        return ""
+
+    split_chars = ['?', '.']
+    min_index = min([q.find(c) for c in split_chars if c in q] + [len(q)])
+
+    cleaned = q[:min_index + 1] if min_index < len(q) else q
+    return cleaned.strip()
+
 @st.cache_data(show_spinner="Generating sample questions ...")
 def generate_questions_cached():
     vn = setup_vanna()
-    return vn.generate_questions()
+    raw_questions = vn.generate_questions()
 
+    if isinstance(raw_questions, list):
+        return [clean_question_text(q) for q in raw_questions if isinstance(q, str)]
+    return []
 
 @st.cache_data(show_spinner="Generating SQL query ...")
 def generate_sql_cached(question: str):
@@ -70,12 +84,10 @@ def generate_plotly_code_cached(question, sql, df):
     code = vn.generate_plotly_code(question=question, sql=sql, df=df)
     return code
 
-
 @st.cache_data(show_spinner="Running Plotly code ...")
 def generate_plot_cached(code, df):
     vn = setup_vanna()
-    return vn.get_plotly_figure(plotly_code=code, df=df)
-
+    return vn.get_plotly_figure(plotly_code=code, df=df)\
 
 @st.cache_data(show_spinner="Generating followup questions ...")
 def generate_followup_cached(question, sql, df):
