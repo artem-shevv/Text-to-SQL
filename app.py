@@ -1,5 +1,4 @@
 import streamlit as st
-from vanna_calls import setup_vanna 
 from vanna_calls import (
     generate_questions_cached,
     generate_sql_cached,
@@ -14,7 +13,7 @@ from vanna_calls import (
 avatar_url = "https://vanna.ai/img/vanna.svg"
 
 st.set_page_config(layout="wide")
-vn = setup_vanna()
+
 
 # --- Sidebar settings ---
 st.sidebar.title("Output Settings")
@@ -74,8 +73,6 @@ def show_suggested_questions():
             st.button(question, on_click=set_question, args=(question,))
 
 # --- Chat Input ---
-
-
 # --- Быстрые кнопки с вопросами ---
 st.markdown("### Быстрые вопросы:")
 col1, col2, col3 = st.columns(3)
