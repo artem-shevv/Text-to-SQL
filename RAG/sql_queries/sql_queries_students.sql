@@ -95,7 +95,7 @@ SELECT DISTINCT PL.PHONE_NUMBER
     JOIN PHONE_LIST PL ON PL.TE_NO = S.TE_NO
     WHERE ST.ST_NO = '54868-4585';
 
--- Кто преподавал мне "machine learning"?
+-- Кто преподавал мне машинное обучение?
 SELECT T.FULL_NAME
     FROM SUBJECTS S
     JOIN TEACHERS T ON S.TE_NO = T.TE_NO
@@ -313,9 +313,332 @@ ORDER BY C.CR_NO, subjects.ord;
 
 
 
+--Какие предметы я не сдал?
+WITH 
+-- Получаем информацию о студенте
+student_info AS (
+    SELECT 
+        ST.ST_NO,
+        ST.ID_NO_GR,
+        SI.CR_NO AS current_course,
+        SI.GR_NO
+    FROM 
+        STUDENTS ST
+    JOIN 
+        STUDENTS_INFO SI ON ST.ST_NO = SI.ST_NO
+    WHERE 
+        ST.ST_NO = '55910-988'
+),
+
+-- Получаем направление подготовки
+specialization AS (
+    SELECT 
+        C.SP_CODE,
+        C.CR_NO
+    FROM 
+        GROUPS G
+    JOIN 
+        COURSE C ON G.ID_NO_CR = C.ID_NO
+    WHERE 
+        G.ID_NO = (SELECT ID_NO_GR FROM student_info)
+),
+
+-- Получаем все курсы направления с предметами
+all_courses AS (
+    SELECT 
+        C.CR_NO,
+        UNNEST(C.LIST_SU_NO) AS SU_NO,
+        row_number() OVER (PARTITION BY C.CR_NO ORDER BY UNNEST(C.LIST_SU_NO)) AS subject_pos
+    FROM 
+        COURSE C
+    WHERE 
+        C.SP_CODE = (SELECT SP_CODE FROM specialization)
+        AND C.CR_NO <= (SELECT current_course FROM student_info) -- Только пройденные курсы
+),
+
+-- Разворачиваем экзаменационные оценки
+exam_results AS (
+    SELECT 
+        e.SU_NO[sub.idx] AS subject_id,
+        e.MARK[sub.idx] AS mark_value,
+        sub.idx AS position
+    FROM 
+        EXAMINATION e,
+        generate_subscripts(e.SU_NO, 1) AS sub(idx)
+    WHERE 
+        e.ST_NO = '55910-988'
+),
+
+-- Находим несданные экзамены (оценка 2) с определением курса
+failed_exams AS (
+    SELECT 
+        er.subject_id AS SU_NO,
+        'Экзамен' AS TYPE,
+        -- Определяем курс по позиции: первые 2 предмета - курс 1, след 2 - курс 2 и т.д.
+        ((er.position - 1) / 2) + 1 AS COURSE_NUMBER
+    FROM 
+        exam_results er
+    WHERE 
+        er.mark_value = 2
+),
+
+-- Разворачиваем зачетные оценки
+attestation_results AS (
+    SELECT 
+        a.SU_NO[sub.idx] AS subject_id,
+        a.CHECK_ST[sub.idx] AS result_value,
+        sub.idx AS position
+    FROM 
+        ATTESTATION a,
+        generate_subscripts(a.SU_NO, 1) AS sub(idx)
+    WHERE 
+        a.ST_NO = '55910-988'
+        AND sub.idx <= array_length(a.CHECK_ST, 1)
+),
+
+-- Находим несданные зачеты (значение 'Не сдано') с определением курса
+failed_attests AS (
+    SELECT 
+        ar.subject_id AS SU_NO,
+        'Зачет' AS TYPE,
+        -- Определяем курс по позиции: первые 2 предмета - курс 1, след 2 - курс 2 и т.д.
+        ((ar.position - 1) / 2) + 1 AS COURSE_NUMBER
+    FROM 
+        attestation_results ar
+    WHERE 
+        ar.result_value = 'Not passed'
+)
+
+-- Объединяем результаты
+SELECT 
+    f.SU_NO,
+    S.SUBJECT,
+    T.FULL_NAME AS TEACHER_NAME,
+    f.COURSE_NUMBER,
+    f.TYPE
+FROM (
+    SELECT SU_NO, TYPE, COURSE_NUMBER FROM failed_exams
+    UNION ALL
+    SELECT SU_NO, TYPE, COURSE_NUMBER FROM failed_attests
+) f
+JOIN 
+    SUBJECTS S ON f.SU_NO = S.SU_NO
+LEFT JOIN 
+    TEACHERS T ON S.TE_NO = T.TE_NO
+WHERE 
+    f.SU_NO IN (SELECT SU_NO FROM all_courses)
+ORDER BY 
+    COURSE_NUMBER, TYPE, SUBJECT;
+
+
+
+
+
 --Какие экзамены я не сдал?
+WITH 
+-- Получаем информацию о студенте
+student_info AS (
+    SELECT 
+        ST.ST_NO,
+        ST.ID_NO_GR,
+        SI.CR_NO AS current_course
+    FROM 
+        STUDENTS ST
+    JOIN 
+        STUDENTS_INFO SI ON ST.ST_NO = SI.ST_NO
+    WHERE 
+        ST.ST_NO = '55910-988'
+),
+
+-- Разворачиваем экзаменационные оценки
+exam_unpacked AS (
+    SELECT 
+        pos,
+        SU_NO[pos] AS subject_id,
+        MARK[pos] AS mark_value,
+        -- Определяем курс по позиции: первые 2 предмета - курс 1, след 2 - курс 2 и т.д.
+        ((pos - 1) / 2) + 1 AS COURSE_NUMBER
+    FROM 
+        EXAMINATION,
+        generate_subscripts(SU_NO, 1) AS pos
+    WHERE 
+        ST_NO = '55910-988'
+)
+
+-- Выводим только несданные экзамены
+SELECT 
+    eu.subject_id AS SU_NO,
+    S.SUBJECT,
+    T.FULL_NAME AS TEACHER_NAME,
+    eu.COURSE_NUMBER,
+    'Экзамен' AS TYPE
+FROM 
+    exam_unpacked eu
+JOIN 
+    SUBJECTS S ON eu.subject_id = S.SU_NO
+LEFT JOIN 
+    TEACHERS T ON S.TE_NO = T.TE_NO
+WHERE 
+    eu.mark_value = 2
+ORDER BY 
+    eu.COURSE_NUMBER, S.SUBJECT;
 
 
 
+
+
+
+--Какие зачёты я не сдал?
+WITH 
+-- Получаем информацию о студенте
+student_info AS (
+    SELECT 
+        ST.ST_NO,
+        ST.ID_NO_GR,
+        SI.CR_NO AS current_course
+    FROM 
+        STUDENTS ST
+    JOIN 
+        STUDENTS_INFO SI ON ST.ST_NO = SI.ST_NO
+    WHERE 
+        ST.ST_NO = '55910-988'
+),
+
+-- Разворачиваем зачетные оценки
+attestation_unpacked AS (
+    SELECT 
+        pos,
+        SU_NO[pos] AS subject_id,
+        CHECK_ST[pos] AS result_value,
+        -- Определяем курс по позиции: первые 2 предмета - курс 1, след 2 - курс 2 и т.д.
+        ((pos - 1) / 2) + 1 AS COURSE_NUMBER
+    FROM 
+        ATTESTATION,
+        generate_subscripts(SU_NO, 1) AS pos
+    WHERE 
+        ST_NO = '55910-988'
+        AND pos <= array_length(CHECK_ST, 1)
+)
+
+-- Выводим только несданные зачеты
+SELECT 
+    au.subject_id AS SU_NO,
+    S.SUBJECT,
+    T.FULL_NAME AS TEACHER_NAME,
+    au.COURSE_NUMBER,
+    'Зачет' AS TYPE
+FROM 
+    attestation_unpacked au
+JOIN 
+    SUBJECTS S ON au.subject_id = S.SU_NO
+LEFT JOIN 
+    TEACHERS T ON S.TE_NO = T.TE_NO
+WHERE 
+    au.result_value = 'Not passed'
+ORDER BY 
+    au.COURSE_NUMBER, S.SUBJECT;
+
+
+
+
+
+--Сколько студентов обучается у яковлева владислава евгеньевича?
+WITH 
+-- Находим преподавателя
+teacher_info AS (
+    SELECT 
+        TE_NO,
+        FULL_NAME
+    FROM 
+        TEACHERS
+    WHERE 
+        FULL_NAME = 'Yakovlev Vladislav Evgenievich'
+),
+
+-- Находим предметы преподавателя
+teacher_subjects AS (
+    SELECT 
+        SU_NO,
+        SUBJECT
+    FROM 
+        SUBJECTS
+    WHERE 
+        TE_NO = (SELECT TE_NO FROM teacher_info)
+),
+
+-- Находим курсы с этими предметами
+courses_with_teacher_subjects AS (
+    SELECT DISTINCT
+        C.ID_NO,
+        C.CR_NO,
+        ts.SU_NO,
+        ts.SUBJECT
+    FROM 
+        COURSE C
+    JOIN 
+        UNNEST(C.LIST_SU_NO) AS course_subject_id ON true
+    JOIN 
+        teacher_subjects ts ON ts.SU_NO = course_subject_id
+),
+
+-- Находим группы на этих курсах
+groups_with_teacher_subjects AS (
+    SELECT 
+        G.ID_NO,
+        G.GR_NO,
+        c.CR_NO,
+        c.SU_NO,
+        c.SUBJECT,
+        array_length(G.LIST_ST_NO, 1) AS students_in_group
+    FROM 
+        GROUPS G
+    JOIN 
+        courses_with_teacher_subjects c ON G.ID_NO_CR = c.ID_NO
+)
+
+-- Итоговый результат
+SELECT 
+    (SELECT TE_NO FROM teacher_info) AS teacher_id,
+    (SELECT FULL_NAME FROM teacher_info) AS teacher_name,
+    gw.SU_NO AS subject_number,  
+    gw.SUBJECT,                  
+    gw.CR_NO AS course_number,
+    SUM(gw.students_in_group) AS total_students
+FROM 
+    groups_with_teacher_subjects gw
+GROUP BY 
+    gw.SU_NO, gw.SUBJECT, gw.CR_NO
+ORDER BY 
+    gw.CR_NO, gw.SU_NO;
+
+
+
+
+
+
+
+--я студент 55154-0904 общая ифномрмация
+SELECT 
+    st.ST_NO AS student_number,
+    st.SURNAME AS last_name,
+    st.NAME AS first_name,
+    gr.id_no_cr AS course_id,
+    si.CR_NO AS course_number,
+    st.ID_NO_GR AS group_id,
+    si.GR_NO AS group_number,
+    si.BIRTHDAY,
+    si.MOTHERLAND AS homeland,
+    si.ADDRESS,
+    cr.SP_CODE AS specialization
+FROM 
+    STUDENTS st
+JOIN 
+    STUDENTS_INFO si ON st.ST_NO = si.ST_NO
+JOIN 
+    GROUPS gr ON st.ID_NO_GR = gr.ID_NO
+JOIN 
+    COURSE cr ON gr.ID_NO_CR = cr.ID_NO
+WHERE 
+    st.ST_NO = '55154-0904';
 
 ---------------------------------------------------------------------------------------------------------------------------------------------------------

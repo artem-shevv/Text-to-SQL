@@ -40,3 +40,67 @@ JOIN GROUPS G ON C.ID_NO = G.ID_NO_CR
 JOIN STUDENTS ST ON G.ID_NO = ST.ID_NO_GR
 GROUP BY SP.SP_CODE, SP.SPECIALIZATION
 ORDER BY COUNT(ST.ST_NO) DESC;
+
+
+
+
+-- я администратор 62-180-5657
+WITH 
+student_count AS (
+    SELECT 
+        COUNT(*) AS total_students
+    FROM 
+        STUDENTS
+),
+
+group_count AS (
+    SELECT 
+        COUNT(*) AS total_groups
+    FROM 
+        GROUPS
+),
+
+course_count AS (
+    SELECT 
+        COUNT(*) AS total_courses
+    FROM 
+        COURSE
+),
+
+teacher_count AS (
+    SELECT 
+        COUNT(*) AS total_teachers
+    FROM 
+        TEACHERS
+),
+
+subject_count AS (
+    SELECT 
+        COUNT(*) AS total_subjects
+    FROM 
+        SUBJECTS
+),
+
+specialization_count AS (
+    SELECT 
+        COUNT(*) AS total_specializations
+    FROM 
+        SPECIALIZATION
+)
+
+SELECT 
+    sc.total_students,
+    gc.total_groups,
+    cc.total_courses,
+    tc.total_teachers,
+    sb.total_subjects,
+    sp.total_specializations
+FROM 
+    student_count sc,
+    group_count gc,
+    course_count cc,
+    teacher_count tc,
+    subject_count sb,
+    specialization_count sp;
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------

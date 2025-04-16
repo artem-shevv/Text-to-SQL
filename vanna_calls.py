@@ -7,29 +7,34 @@ class MyVanna(VannaDB_VectorStore, OpenAI_Chat):
         # Инициализация с использованием st.secrets
         VannaDB_VectorStore.__init__(
             self,
-            vanna_model="vanna_performance",
+            vanna_model="vanna_performance_set_questions",
             vanna_api_key=st.secrets.get("VANNA_API_KEY")
         )
         OpenAI_Chat.__init__(
             self,
             config={
                 "api_key": st.secrets.get("OPENAI_API_KEY"),
-                "model": "gpt-4o-mini"  # Или ваша версия модели
+                "model": "gpt-4o-mini"  
             }
         )
 
+    def get_top_training_matches(self, question, top_k=1):
+        # Используем метод get_similar_question_sql для получения похожих запросов
+        similar_questions = self.get_similar_question_sql(question, top_k=top_k)
+        return similar_questions
+    
 @st.cache_resource(ttl=3600)
 def setup_vanna():
     vn = MyVanna()
     # Подключение к PostgreSQL через секреты
     vn.connect_to_postgres(
-        host=st.secrets.postgres["host"],  # Обращение к вложенной структуре
+        host=st.secrets.postgres["host"],  
         dbname=st.secrets.postgres["dbname"],
         user=st.secrets.postgres["user"],
         password=st.secrets.postgres["password"],
         port=st.secrets.postgres["port"],
         sslmode="require",  # Обязательно для Supabase
-        connect_timeout=5  # Рекомендуется для pooler
+        connect_timeout=5  
     )
     return vn
 

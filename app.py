@@ -1,7 +1,5 @@
-import time
 import streamlit as st
-import pandas as pd
-from io import StringIO
+from vanna_calls import setup_vanna 
 from vanna_calls import (
     generate_questions_cached,
     generate_sql_cached,
@@ -16,6 +14,7 @@ from vanna_calls import (
 avatar_url = "https://vanna.ai/img/vanna.svg"
 
 st.set_page_config(layout="wide")
+vn = setup_vanna()
 
 # --- Sidebar settings ---
 st.sidebar.title("Output Settings")
@@ -75,6 +74,33 @@ def show_suggested_questions():
             st.button(question, on_click=set_question, args=(question,))
 
 # --- Chat Input ---
+
+
+# --- Быстрые кнопки с вопросами ---
+st.markdown("### Быстрые вопросы:")
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    if st.button("🎓 Я студент 11111-222, когда у меня день рождения?"):
+        st.session_state["my_question"] = "Я студент 11111-222, когда у меня день рождения?"
+        st.session_state["df"] = None
+        st.session_state["user_input"] = st.session_state["my_question"]
+
+with col2:
+    if st.button("👨‍🏫 Я преподаватель 62-180-5657, какие дисциплины я преподаю?"):
+        st.session_state["my_question"] = "Я преподаватель 62-180-5657, какие дисциплины я преподаю?"
+        st.session_state["df"] = None
+        st.session_state["user_input"] = st.session_state["my_question"]
+
+with col3:
+    if st.button("🧑‍💼 Я администратор 08-731-2673, сколько студентов обучается на каждой специальности?"):
+        st.session_state["my_question"] = "Я администратор 08-731-2673, сколько студентов по каждой специальности?"
+        st.session_state["df"] = None
+        st.session_state["user_input"] = st.session_state["my_question"]
+
+
+
+
 new_question = st.chat_input("Задайте вопрос о ваших данных")
 
 if new_question:
@@ -105,8 +131,24 @@ for entry in st.session_state.chat_history:
         else:
             assistant_msg.dataframe(df)
 
-    if st.session_state.get("show_summary", True) and entry.get("summary"):
-        assistant_msg.text(entry["summary"])
+    if st.session_state.get("show_chart", True) and entry.get("df") is not None and entry.get("question") and entry.get("sql"):
+        if should_generate_chart_cached(question=entry["question"], sql=entry["sql"], df=entry["df"]):
+            code = generate_plotly_code_cached(question=entry["question"], sql=entry["sql"], df=entry["df"])
+            if st.session_state.get("show_plotly_code", False):
+                assistant_msg.code(code, language="python")
+            if code:
+                fig = generate_plot_cached(code=code, df=entry["df"])
+                if fig:
+                    assistant_msg.plotly_chart(fig)
+
+    
+    if st.session_state.get("show_summary", True):
+        summary = entry.get("summary")
+        if not summary:
+            summary = generate_summary_cached(question=entry["question"] + " (ответь на русском)", df=entry["df"])
+            entry["summary"] = summary
+        if summary:
+            assistant_msg.text(summary)
 
 # --- Обработка нового вопроса ---
 my_question = st.session_state.get("my_question", None)
@@ -130,6 +172,7 @@ if my_question:
 
     context_text = "\n\n".join(context_parts)
     full_question = f"{context_text}\n\nQ: {my_question}" if context_text else my_question
+
 
     sql = generate_sql_cached(question=full_question)
 
@@ -173,7 +216,7 @@ if my_question:
         # Summary
         summary = None
         if st.session_state.get("show_summary", True):
-            summary = generate_summary_cached(question=my_question, df=df)
+            summary = generate_summary_cached(question=my_question + " (ответь на русском языке)", df=df)
             if summary:
                 st.chat_message("assistant", avatar=avatar_url).text(summary)
 

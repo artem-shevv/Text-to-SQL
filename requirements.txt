@@ -2,3 +2,4 @@ vanna[openai,postgres]
 streamlit
 python-dotenv
 psycopg2-binary 
+nltk
