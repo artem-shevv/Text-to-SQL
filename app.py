@@ -13,7 +13,58 @@ from vanna_calls import (
 avatar_url = "https://vanna.ai/img/vanna.svg"
 
 st.set_page_config(layout="wide")
+# --- Custom responsive styles ---
+st.markdown("""
+    <style>
+        html, body, [class*="css"] {
+            font-size: 14px;
+        }
 
+        @media (max-width: 768px) {
+            html, body, [class*="css"] {
+                font-size: 12px !important;
+            }
+
+            h1 {
+                font-size: 18px !important;
+                margin-top: 1rem !important; /* добавим отступ сверху */
+                margin-bottom: 0.5rem !important;
+                text-align: center; /* чтобы смотрелось аккуратно */
+            }
+
+            /* Остальные стили */
+            button {
+                font-size: 12px !important;
+                padding: 4px 8px !important;
+            }
+
+            .stButton>button {
+                height: auto !important;
+                width: 100% !important;
+            }
+
+            [data-testid="stDecoration"] {
+                display: none;
+            }
+
+            section[data-testid="stSidebar"] {
+                padding: 0.5rem !important;
+            }
+
+            .markdown-text-container {
+                font-size: 13px !important;
+            }
+
+            .stChatMessage {
+                font-size: 13px !important;
+            }
+
+            .block-container {
+                padding: 0.5rem 1rem 1rem 1rem !important;
+            }
+        }
+    </style>
+""", unsafe_allow_html=True)
 
 # --- Sidebar settings ---
 st.sidebar.title("Output Settings")
@@ -34,6 +85,9 @@ if st.sidebar.button("Reset Chat", use_container_width=True):
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
+if "show_suggestions" not in st.session_state:
+    st.session_state["show_suggestions"] = False
+
 # --- Suggested Questions ---
 def set_question(question):
     st.session_state["my_question"] = question
@@ -48,7 +102,7 @@ NEUTRAL_QUESTIONS = [
     "Сколько всего групп?",
     "Сколько групп на каждом курсе?",
     "Какие дисциплины ведёт каждый преподаватель?",
-    "Сколько студентов по каждой специальности?"
+    "Сколько студентов обучается на каждой специальности?"
 ]
 
 # --- Check for ID input based on keywords ---
@@ -60,17 +114,24 @@ def check_for_id_input(user_input):
 
 # --- Suggested Questions Section ---
 def show_suggested_questions():
+    if "show_suggestions" not in st.session_state:
+        st.session_state["show_suggestions"] = False
+
     assistant_message_suggested = st.chat_message("assistant", avatar=avatar_url)
     if assistant_message_suggested.button("Click to show suggested questions"):
+        st.session_state["show_suggestions"] = not st.session_state["show_suggestions"]
         st.session_state["my_question"] = None
-        # If user input contains ID (check for keyword + digits), show real model questions
+
+    if st.session_state["show_suggestions"]:
         if "user_input" in st.session_state and check_for_id_input(st.session_state["user_input"]):
             questions = generate_questions_cached()  # Use the model's questions
         else:
             questions = NEUTRAL_QUESTIONS  # Default neutral questions
 
-        for question in questions:
-            st.button(question, on_click=set_question, args=(question,))
+        for i, question in enumerate(questions):
+            st.button(question, on_click=set_question, args=(question,), key=f"suggested_q_{i}")
+
+
 
 # --- Chat Input ---
 # --- Быстрые кнопки с вопросами ---
@@ -91,7 +152,7 @@ with col2:
 
 with col3:
     if st.button("🧑‍💼 Я администратор 08-731-2673, сколько студентов обучается на каждой специальности?"):
-        st.session_state["my_question"] = "Я администратор 08-731-2673, сколько студентов по каждой специальности?"
+        st.session_state["my_question"] = "Я администратор 08-731-2673, сколько студентов обучается на каждой специальности?"
         st.session_state["df"] = None
         st.session_state["user_input"] = st.session_state["my_question"]
 
