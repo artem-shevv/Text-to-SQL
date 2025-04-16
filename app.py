@@ -107,9 +107,8 @@ if new_question:
     st.session_state["user_input"] = new_question
 
 # --- Render chat history ---
-for entry in st.session_state.chat_history:
+for i, entry in enumerate(st.session_state.chat_history):
     st.chat_message("user").write(entry["question"])
-
     assistant_msg = st.chat_message("assistant", avatar=avatar_url)
 
     if st.session_state.get("show_sql", True):
@@ -117,14 +116,22 @@ for entry in st.session_state.chat_history:
 
     if st.session_state.get("show_table", True) and entry.get("df") is not None:
         df = entry["df"]
-        
-        # Check if the dataframe has more than 10 rows
         if len(df) > 10:
-            assistant_msg.text("Displaying first 10 rows of data:")
-            assistant_msg.dataframe(df.head(10))  # Display first 10 rows with scroll
-            # Provide a download link for the full dataset
+            assistant_msg.text("First 10 rows of data")
+            assistant_msg.dataframe(df.head(10))
+
             csv = df.to_csv(index=False)
-            st.download_button(label="Download Full Data", data=csv, file_name="full_data.csv", mime="text/csv")
+
+            
+            unique_key = f"download_button_{i}_{id(entry)}"
+
+            st.download_button(
+                label=f"Download Full Data (Q{i+1})",
+                data=csv,
+                file_name=f"full_data_{i}.csv",
+                mime="text/csv",
+                key=unique_key
+            )
         else:
             assistant_msg.dataframe(df)
 
