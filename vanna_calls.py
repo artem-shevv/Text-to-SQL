@@ -38,24 +38,13 @@ def setup_vanna():
     )
     return vn
 
-
-def clean_question_text(q):
-    if not isinstance(q, str):
-        return ""
-
-    split_chars = ['?', '.']
-    min_index = min([q.find(c) for c in split_chars if c in q] + [len(q)])
-
-    cleaned = q[:min_index + 1] if min_index < len(q) else q
-    return cleaned.strip()
-
 @st.cache_data(show_spinner="Generating sample questions ...")
 def generate_questions_cached():
     vn = setup_vanna()
     raw_questions = vn.generate_questions()
 
     if isinstance(raw_questions, list):
-        return [clean_question_text(q) for q in raw_questions if isinstance(q, str)]
+        return [q for q in raw_questions if isinstance(q, str)]
     return []
 
 @st.cache_data(show_spinner="Generating SQL query ...")

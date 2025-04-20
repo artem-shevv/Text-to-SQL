@@ -1,3 +1,4 @@
+import random
 import logging
 import traceback
 import os
@@ -17,14 +18,13 @@ avatar_url = "https://vanna.ai/img/vanna.svg"
 
 st.set_page_config(layout="wide")
 
-
 logging.basicConfig(
     filename="app.log",
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-ENABLE_LOG_DOWNLOAD = True #False
+ENABLE_LOG_DOWNLOAD =  False#True
 
 # --- Custom responsive styles ---
 st.markdown("""
@@ -45,7 +45,6 @@ st.markdown("""
                 text-align: center; 
             }
 
-            
             button {
                 font-size: 12px !important;
                 padding: 4px 8px !important;
@@ -93,6 +92,7 @@ if st.sidebar.button("Reset Chat", use_container_width=True):
     st.session_state.pop("my_question", None)
     st.session_state.pop("df", None)
     st.session_state.pop("user_input", None)  
+    st.session_state.pop("last_user_id", None)  # Reset last user ID
 
 # --- Init chat history ---
 if "chat_history" not in st.session_state:
@@ -125,7 +125,58 @@ def check_for_id_input(user_input):
         return True
     return False
 
-# --- Suggested Questions Section ---
+# --- Определение роли по вводу пользователя ---
+def get_user_role(user_input):
+    roles = {
+        "студент": ["студент", "ученик"],
+        "преподаватель": ["преподаватель", "учитель", "педагог"],
+        "администратор": ["администратор"]
+    }
+
+    if any(c.isdigit() for c in user_input):
+        lower_input = user_input.lower()
+        for role, keywords in roles.items():
+            if any(keyword in lower_input for keyword in keywords):
+                return role
+    return None
+
+# --- Категоризация сгенерированных вопросов ---
+def categorize_questions(questions):
+    categorized = {
+        "student": [],
+        "teacher": [],
+        "admin": [],
+        "neutral": []
+    }
+
+    for q in questions:
+        q_clean = q.strip()
+        if q_clean.endswith("Я студент"):
+            categorized["student"].append(q)
+        elif q_clean.endswith("Я преподаватель"):
+            categorized["teacher"].append(q)
+        elif "Я студент" in q_clean or "Я преподаватель" in q_clean:
+            # Исключаем вопросы, содержащие "Я студент" или "Я преподаватель"
+            continue
+        elif "Я администратор" in q_clean:
+            categorized["admin"].append(q)
+        else:
+            categorized["neutral"].append(q)
+
+    return categorized
+
+# --- Очистка конца вопроса ---
+def clean_question_text(q):
+    if not isinstance(q, str):
+        return ""
+
+    split_chars = ['?', '.']
+    min_index = min([q.find(c) for c in split_chars if c in q] + [len(q)])
+
+    cleaned = q[:min_index + 1] if min_index < len(q) else q
+    return cleaned.strip()
+
+# --- Отображение рекомендованных вопросов ---
 def show_suggested_questions():
     if "show_suggestions" not in st.session_state:
         st.session_state["show_suggestions"] = False
@@ -136,39 +187,99 @@ def show_suggested_questions():
         st.session_state["my_question"] = None
 
     if st.session_state["show_suggestions"]:
-        if "user_input" in st.session_state and check_for_id_input(st.session_state["user_input"]):
-            questions = generate_questions_cached()  # Use the model's questions
+        user_input = st.session_state.get("user_input", "")
+        user_role = get_user_role(user_input)
+
+        if user_role:
+            all_questions = generate_questions_cached()
+            categorized = categorize_questions(all_questions)
+
+            max_total = 6
+            n_personal = random.randint(2, max_total - 2)
+            n_neutral = max_total - n_personal
+
+            role_map = {
+                "студент": "student",
+                "преподаватель": "teacher",
+                "администратор": "admin"
+            }
+
+            role_key = role_map.get(user_role, "neutral")
+
+            if user_role == "администратор":
+                # Для администратора показываем только нейтральные вопросы
+                selected_questions = categorized.get("neutral", [])[:n_neutral]
+            else:
+                # Для остальных ролей — комбинируем персонализированные и нейтральные вопросы
+                personalized = categorized.get(role_key, [])[:n_personal]
+                neutrals = categorized.get("neutral", [])[:n_neutral]
+                selected_questions = personalized + neutrals
+
+            random.shuffle(selected_questions)
         else:
-            questions = NEUTRAL_QUESTIONS  
+            selected_questions = NEUTRAL_QUESTIONS
 
-        for i, question in enumerate(questions):
-            st.button(question, on_click=set_question, args=(question,), key=f"suggested_q_{i}")
-
-
+        # 👇 Очистка вопросов только для отображения
+        for i, question in enumerate(selected_questions):
+            short_q = clean_question_text(question)
+            st.button(short_q, on_click=set_question, args=(short_q,), key=f"suggested_q_{i}")
 
 # --- Chat Input ---
 st.markdown("### Тестовые запросы:")
-col1, col2, col3 = st.columns(3)
 
-with col1:
-    if st.button("🎓 Я студент 11111-222, когда у меня день рождения?"):
-        st.session_state["my_question"] = "Я студент 11111-222, когда у меня день рождения?"
-        st.session_state["df"] = None
-        st.session_state["user_input"] = st.session_state["my_question"]
+# Список всех тестовых запросов
+test_questions = [
+    "🎓 Я студент 11111-222, когда у меня день рождения?",
+    "Я студент 11112-222, кто староста моей группы?",
+    "Я студент 11113-222, что я изучу за время учёбы на этом направлении подготовки?",
+    "👨‍🏫 Я преподаватель 62-180-5657, какие дисциплины я преподаю?",
+    "Я преподаватель 62-180-5657, сколько студентов я обучаю?",
+    "Я преподаватель 62-180-5657, какой у меня номер телефона?",
+    "🧑‍💼 Я администратор 08-731-2673, сколько студентов обучается на каждой специальности?",
+    "Я администратор 08-731-2673, какие дисциплины ведёт каждый преподаватель?",
+    "Я администратор 08-731-2673, сколько преподавателей работает в институте?"
+]
 
-with col2:
-    if st.button("👨‍🏫 Я преподаватель 62-180-5657, какие дисциплины я преподаю?"):
-        st.session_state["my_question"] = "Я преподаватель 62-180-5657, какие дисциплины я преподаю?"
-        st.session_state["df"] = None
-        st.session_state["user_input"] = st.session_state["my_question"]
+# Состояние страницы
+if "test_question_page" not in st.session_state:
+    st.session_state["test_question_page"] = 0
 
-with col3:
-    if st.button("🧑‍💼 Я администратор 08-731-2673, сколько студентов обучается на каждой специальности?"):
-        st.session_state["my_question"] = "Я администратор 08-731-2673, сколько студентов обучается на каждой специальности?"
-        st.session_state["df"] = None
-        st.session_state["user_input"] = st.session_state["my_question"]
+# Флаг нажатия переключателя
+if "carousel_advance" not in st.session_state:
+    st.session_state["carousel_advance"] = False
 
+# Обработка нажатия кнопки переключения
+def advance_carousel():
+    st.session_state["test_question_page"] = (st.session_state["test_question_page"] + 1) % (len(test_questions) // 3)
+    st.session_state["carousel_advance"] = True
 
+    # Очистка истории и контекста модели
+    st.session_state.pop("chat_history", None)
+    st.session_state.pop("my_question", None)
+    st.session_state.pop("df", None)
+    st.session_state.pop("user_input", None)
+
+# Интерфейс кнопок
+start_index = st.session_state["test_question_page"] * 3
+current_questions = test_questions[start_index:start_index + 3]
+
+cols = st.columns([4, 4, 4, 1])  # Последняя колонка — под ⏭️
+
+# Основные кнопки
+for i, col in enumerate(cols[:3]):
+    if i < len(current_questions):
+        q = current_questions[i]
+        with col:
+            if st.button(q, key=f"question_button_{start_index + i}"):
+                st.session_state["my_question"] = q
+                st.session_state["df"] = None
+                st.session_state["user_input"] = q
+                # Сброс флага переключения
+                st.session_state["carousel_advance"] = False
+
+# Кнопка переключения страниц
+with cols[3]:
+    st.button("🔄", key="next_page", on_click=advance_carousel, help="Показать другие примеры")
 
 
 new_question = st.chat_input("Задайте вопрос о ваших данных")
@@ -195,7 +306,6 @@ for i, entry in enumerate(st.session_state.chat_history):
 
             csv = df.to_csv(index=False)
 
-            
             unique_key = f"download_button_{i}_{id(entry)}"
 
             st.download_button(
@@ -218,7 +328,6 @@ for i, entry in enumerate(st.session_state.chat_history):
                 if fig:
                     assistant_msg.plotly_chart(fig)
 
-    
     if st.session_state.get("show_summary", True):
         summary = entry.get("summary")
         if not summary:
