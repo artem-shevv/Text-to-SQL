@@ -265,9 +265,9 @@ if my_question:
         # Запуск SQL
         df = run_sql_cached(sql=sql)
         if df is None or df.empty:
-            logging.warning("SQL-запрос не вернул данных")
-            st.chat_message("assistant", avatar=avatar_url).error("Query returned no data.")
-            st.stop()
+            logging.info("SQL-запрос не вернул данных")
+            #st.chat_message("assistant", avatar=avatar_url).error("Query returned no data.")
+            #st.stop()
 
         logging.info(f"Успешно выполнен SQL-запрос. Кол-во строк: {len(df)}")
 
