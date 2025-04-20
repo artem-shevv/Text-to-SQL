@@ -1,3 +1,6 @@
+import logging
+import traceback
+import os
 import streamlit as st
 from vanna_calls import (
     generate_questions_cached,
@@ -13,6 +16,16 @@ from vanna_calls import (
 avatar_url = "https://vanna.ai/img/vanna.svg"
 
 st.set_page_config(layout="wide")
+
+
+logging.basicConfig(
+    filename="app.log",
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+
+ENABLE_LOG_DOWNLOAD = True #False
+
 # --- Custom responsive styles ---
 st.markdown("""
     <style>
@@ -27,12 +40,12 @@ st.markdown("""
 
             h1 {
                 font-size: 18px !important;
-                margin-top: 1rem !important; /* добавим отступ сверху */
+                margin-top: 1rem !important; 
                 margin-bottom: 0.5rem !important;
-                text-align: center; /* чтобы смотрелось аккуратно */
+                text-align: center; 
             }
 
-            /* Остальные стили */
+            
             button {
                 font-size: 12px !important;
                 padding: 4px 8px !important;
@@ -79,7 +92,7 @@ if st.sidebar.button("Reset Chat", use_container_width=True):
     st.session_state.pop("chat_history", None)
     st.session_state.pop("my_question", None)
     st.session_state.pop("df", None)
-    st.session_state.pop("user_input", None)  # Reset the user input flag for ID check
+    st.session_state.pop("user_input", None)  
 
 # --- Init chat history ---
 if "chat_history" not in st.session_state:
@@ -126,7 +139,7 @@ def show_suggested_questions():
         if "user_input" in st.session_state and check_for_id_input(st.session_state["user_input"]):
             questions = generate_questions_cached()  # Use the model's questions
         else:
-            questions = NEUTRAL_QUESTIONS  # Default neutral questions
+            questions = NEUTRAL_QUESTIONS  
 
         for i, question in enumerate(questions):
             st.button(question, on_click=set_question, args=(question,), key=f"suggested_q_{i}")
@@ -134,8 +147,7 @@ def show_suggested_questions():
 
 
 # --- Chat Input ---
-# --- Быстрые кнопки с вопросами ---
-st.markdown("### Быстрые вопросы:")
+st.markdown("### Тестовые запросы:")
 col1, col2, col3 = st.columns(3)
 
 with col1:
@@ -221,62 +233,60 @@ my_question = st.session_state.get("my_question", None)
 if my_question:
     st.chat_message("user").write(my_question)
 
-    # Сбор контекста из истории (включая SQL и данные)
-    def df_to_string(df):
-        if df is None or df.empty:
-            return "No data"
-        return df.head(5).to_csv(index=False)
+    try:
+        logging.info(f"Новый вопрос: {my_question}")
 
-    recent_context = st.session_state.chat_history[-5:]
-    context_parts = []
-    for entry in recent_context:
-        part = f"Q: {entry['question']}\nSQL: {entry['sql']}"
-        if entry.get("df") is not None:
-            part += f"\nDATA:\n{df_to_string(entry['df'])}"
-        context_parts.append(part)
+        # Сбор контекста из истории
+        def df_to_string(df):
+            if df is None or df.empty:
+                return "No data"
+            return df.head(5).to_csv(index=False)
 
-    context_text = "\n\n".join(context_parts)
-    full_question = f"{context_text}\n\nQ: {my_question}" if context_text else my_question
+        recent_context = st.session_state.chat_history[-5:]
+        context_parts = []
+        for entry in recent_context:
+            part = f"Q: {entry['question']}\nSQL: {entry['sql']}"
+            if entry.get("df") is not None:
+                part += f"\nDATA:\n{df_to_string(entry['df'])}"
+            context_parts.append(part)
 
+        context_text = "\n\n".join(context_parts)
+        full_question = f"{context_text}\n\nQ: {my_question}" if context_text else my_question
 
-    sql = generate_sql_cached(question=full_question)
+        # Генерация SQL
+        sql = generate_sql_cached(question=full_question)
+        logging.info(f"Сгенерированный SQL: {sql}")
 
-    if sql:
-        if not is_sql_valid_cached(sql=sql):
+        if not sql or not is_sql_valid_cached(sql=sql):
+            logging.error("Сгенерированный SQL некорректен")
             st.chat_message("assistant", avatar=avatar_url).error("Generated SQL is invalid.")
             st.stop()
 
-        if st.session_state.get("show_sql", True):
-            st.chat_message("assistant", avatar=avatar_url).code(sql, language="sql")
-
+        # Запуск SQL
         df = run_sql_cached(sql=sql)
-        if df is not None:
-            st.session_state["df"] = df
-        else:
+        if df is None or df.empty:
+            logging.warning("SQL-запрос не вернул данных")
             st.chat_message("assistant", avatar=avatar_url).error("Query returned no data.")
             st.stop()
 
-        # Показываем таблицу
+        logging.info(f"Успешно выполнен SQL-запрос. Кол-во строк: {len(df)}")
+
+        # Сохраняем DataFrame
+        st.session_state["df"] = df
+
+        # Показываем SQL, таблицу, график (если нужно)
+        if st.session_state.get("show_sql", True):
+            st.chat_message("assistant", avatar=avatar_url).code(sql, language="sql")
+
         if st.session_state.get("show_table", True):
             assistant_msg = st.chat_message("assistant", avatar=avatar_url)
             if len(df) > 10:
                 assistant_msg.text("Displaying first 10 rows of data:")
-                assistant_msg.dataframe(df.head(10))  # Display first 10 rows with scroll
-                # Provide a download link for the full dataset
+                assistant_msg.dataframe(df.head(10))
                 csv = df.to_csv(index=False)
                 st.download_button(label="Download Full Data", data=csv, file_name="full_data.csv", mime="text/csv")
             else:
                 assistant_msg.dataframe(df)
-
-        # Чарт
-        if should_generate_chart_cached(question=my_question, sql=sql, df=df):
-            code = generate_plotly_code_cached(question=my_question, sql=sql, df=df)
-            if st.session_state.get("show_plotly_code", False):
-                st.chat_message("assistant", avatar=avatar_url).code(code, language="python")
-            if st.session_state.get("show_chart", True) and code:
-                fig = generate_plot_cached(code=code, df=df)
-                if fig:
-                    st.chat_message("assistant", avatar=avatar_url).plotly_chart(fig)
 
         # Summary
         summary = None
@@ -285,7 +295,7 @@ if my_question:
             if summary:
                 st.chat_message("assistant", avatar=avatar_url).text(summary)
 
-        # Сохраняем всё в историю
+        # Сохраняем в историю
         st.session_state.chat_history.append({
             "question": my_question,
             "sql": sql,
@@ -294,6 +304,16 @@ if my_question:
         })
 
         st.session_state["my_question"] = None
+
+    except Exception as e:
+        error_trace = traceback.format_exc()
+        logging.error(f"Ошибка при обработке запроса: {str(e)}\n{error_trace}")
+        st.chat_message("assistant", avatar=avatar_url).error("⚠️ Произошла ошибка при обработке запроса.")
+
+if ENABLE_LOG_DOWNLOAD:
+    if os.path.exists("app.log"):
+        with open("app.log", "r") as f:
+            st.sidebar.download_button("Download log", f.read(), file_name="app.log", mime="text/plain", use_container_width=True)
 
 # --- Show suggested questions ---
 show_suggested_questions()
