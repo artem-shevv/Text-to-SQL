@@ -86,6 +86,17 @@ st.sidebar.checkbox("Show Plotly Code", value=True, key="show_plotly_code")
 st.sidebar.checkbox("Show Chart", value=True, key="show_chart")
 st.sidebar.checkbox("Show Summary", value=True, key="show_summary")
 
+# --- Initialize default settings if not set ---
+for key, default in {
+    "show_sql": True,
+    "show_table": True,
+    "show_plotly_code": True,
+    "show_chart": True,
+    "show_summary": True
+}.items():
+    if key not in st.session_state:
+        st.session_state[key] = default
+
 # --- Reset chat ---
 if st.sidebar.button("Reset Chat", use_container_width=True):
     st.session_state.pop("chat_history", None)
@@ -373,44 +384,58 @@ if my_question:
 
         # Запуск SQL
         df = run_sql_cached(sql=sql)
-        if df is None or df.empty:
-            logging.info("SQL-запрос не вернул данных")
-            #st.chat_message("assistant", avatar=avatar_url).error("Query returned no data.")
-            #st.stop()
-
         logging.info(f"Успешно выполнен SQL-запрос. Кол-во строк: {len(df)}")
 
         # Сохраняем DataFrame
         st.session_state["df"] = df
 
-        # Показываем SQL, таблицу, график (если нужно)
-        if st.session_state.get("show_sql", True):
-            st.chat_message("assistant", avatar=avatar_url).code(sql, language="sql")
-
-        if st.session_state.get("show_table", True):
-            assistant_msg = st.chat_message("assistant", avatar=avatar_url)
-            if len(df) > 10:
-                assistant_msg.text("Displaying first 10 rows of data:")
-                assistant_msg.dataframe(df.head(10))
-                csv = df.to_csv(index=False)
-                st.download_button(label="Download Full Data", data=csv, file_name="full_data.csv", mime="text/csv")
-            else:
-                assistant_msg.dataframe(df)
+        # Генерация plotly-кода и графика
+        plotly_code = None
+        fig = None
+        if st.session_state.get("show_chart", True) and should_generate_chart_cached(question=my_question, sql=sql, df=df):
+            plotly_code = generate_plotly_code_cached(question=my_question, sql=sql, df=df)
+            if plotly_code:
+                fig = generate_plot_cached(code=plotly_code, df=df)
 
         # Summary
         summary = None
         if st.session_state.get("show_summary", True):
             summary = generate_summary_cached(question=my_question + " (ответь на русском языке)", df=df)
-            if summary:
-                st.chat_message("assistant", avatar=avatar_url).text(summary)
 
         # Сохраняем в историю
         st.session_state.chat_history.append({
             "question": my_question,
             "sql": sql,
             "df": df,
-            "summary": summary
+            "summary": summary,
+            "plotly_code": plotly_code,
+            "fig": fig
         })
+
+        # Отображение ответа сразу
+        assistant_msg = st.chat_message("assistant", avatar=avatar_url)
+
+        if st.session_state.get("show_sql", True):
+            assistant_msg.code(sql, language="sql")
+
+        if st.session_state.get("show_table", True):
+            if df is not None:
+                if len(df) > 10:
+                    assistant_msg.text("Displaying first 10 rows of data:")
+                    assistant_msg.dataframe(df.head(10))
+                    csv = df.to_csv(index=False)
+                    st.download_button(label="Download Full Data", data=csv, file_name="full_data.csv", mime="text/csv")
+                else:
+                    assistant_msg.dataframe(df)
+
+        if st.session_state.get("show_plotly_code", False) and plotly_code:
+            assistant_msg.code(plotly_code, language="python")
+
+        if st.session_state.get("show_chart", True) and fig:
+            assistant_msg.plotly_chart(fig)
+
+        if st.session_state.get("show_summary", True) and summary:
+            assistant_msg.text(summary)
 
         st.session_state["my_question"] = None
 
@@ -418,6 +443,7 @@ if my_question:
         error_trace = traceback.format_exc()
         logging.error(f"Ошибка при обработке запроса: {str(e)}\n{error_trace}")
         st.chat_message("assistant", avatar=avatar_url).error("⚠️ Произошла ошибка при обработке запроса.")
+
 
 if ENABLE_LOG_DOWNLOAD:
     if os.path.exists("app.log"):
