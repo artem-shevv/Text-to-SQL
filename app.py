@@ -13,6 +13,9 @@ from vanna_calls import (
     is_sql_valid_cached,
     generate_summary_cached
 )
+from checker_injection_calls import (
+    is_sql_injection
+)
 
 avatar_url = "https://vanna.ai/img/vanna.svg"
 
@@ -136,7 +139,7 @@ def check_for_id_input(user_input):
         return True
     return False
 
-# --- Определение роли по вводу пользователя ---
+# --- Defining a role based on user input ---
 def get_user_role(user_input):
     roles = {
         "студент": ["студент", "ученик"],
@@ -151,7 +154,7 @@ def get_user_role(user_input):
                 return role
     return None
 
-# --- Категоризация сгенерированных вопросов ---
+# --- Categorization of generated questions ---
 def categorize_questions(questions):
     categorized = {
         "student": [],
@@ -167,7 +170,6 @@ def categorize_questions(questions):
         elif q_clean.endswith("Я преподаватель"):
             categorized["teacher"].append(q)
         elif "Я студент" in q_clean or "Я преподаватель" in q_clean:
-            # Исключаем вопросы, содержащие "Я студент" или "Я преподаватель"
             continue
         elif "Я администратор" in q_clean:
             categorized["admin"].append(q)
@@ -176,7 +178,7 @@ def categorize_questions(questions):
 
     return categorized
 
-# --- Очистка конца вопроса ---
+# --- Clearing the end of the question ---
 def clean_question_text(q):
     if not isinstance(q, str):
         return ""
@@ -187,7 +189,7 @@ def clean_question_text(q):
     cleaned = q[:min_index + 1] if min_index < len(q) else q
     return cleaned.strip()
 
-# --- Отображение рекомендованных вопросов ---
+# --- Displaying recommended questions ---
 def show_suggested_questions():
     if "show_suggestions" not in st.session_state:
         st.session_state["show_suggestions"] = False
@@ -218,10 +220,10 @@ def show_suggested_questions():
             role_key = role_map.get(user_role, "neutral")
 
             if user_role == "администратор":
-                # Для администратора показываем только нейтральные вопросы
+                # Only show neutral questions for the administrator
                 selected_questions = categorized.get("neutral", [])[:n_neutral]
             else:
-                # Для остальных ролей — комбинируем персонализированные и нейтральные вопросы
+                # For other roles, we combine personalized and neutral questions
                 personalized = categorized.get(role_key, [])[:n_personal]
                 neutrals = categorized.get("neutral", [])[:n_neutral]
                 selected_questions = personalized + neutrals
@@ -230,7 +232,7 @@ def show_suggested_questions():
         else:
             selected_questions = NEUTRAL_QUESTIONS
 
-        # 👇 Очистка вопросов только для отображения
+        # Clearing issues for display only
         for i, question in enumerate(selected_questions):
             short_q = clean_question_text(question)
             st.button(short_q, on_click=set_question, args=(short_q,), key=f"suggested_q_{i}")
@@ -238,7 +240,7 @@ def show_suggested_questions():
 # --- Chat Input ---
 st.markdown("### Тестовые запросы:")
 
-# Список всех тестовых запросов
+# List of all test queries
 test_questions = [
     "🎓 Я студент 11111-222, когда у меня день рождения?",
     "Я студент 11112-222, кто староста моей группы?",
@@ -251,32 +253,32 @@ test_questions = [
     "Я администратор 08-731-2673, сколько преподавателей работает в институте?"
 ]
 
-# Состояние страницы
+# Page status
 if "test_question_page" not in st.session_state:
     st.session_state["test_question_page"] = 0
 
-# Флаг нажатия переключателя
+# Flag for pressing the switch
 if "carousel_advance" not in st.session_state:
     st.session_state["carousel_advance"] = False
 
-# Обработка нажатия кнопки переключения
+# Handling the switch button press
 def advance_carousel():
     st.session_state["test_question_page"] = (st.session_state["test_question_page"] + 1) % (len(test_questions) // 3)
     st.session_state["carousel_advance"] = True
 
-    # Очистка истории и контекста модели
+    # Clearing the history and context of the model
     st.session_state.pop("chat_history", None)
     st.session_state.pop("my_question", None)
     st.session_state.pop("df", None)
     st.session_state.pop("user_input", None)
 
-# Интерфейс кнопок
+# Button interface
 start_index = st.session_state["test_question_page"] * 3
 current_questions = test_questions[start_index:start_index + 3]
 
-cols = st.columns([4, 4, 4, 1])  # Последняя колонка — под ⏭️
+cols = st.columns([4, 4, 4, 1])  
 
-# Основные кнопки
+# Main buttons
 for i, col in enumerate(cols[:3]):
     if i < len(current_questions):
         q = current_questions[i]
@@ -288,7 +290,7 @@ for i, col in enumerate(cols[:3]):
                 # Сброс флага переключения
                 st.session_state["carousel_advance"] = False
 
-# Кнопка переключения страниц
+# Page switching button
 with cols[3]:
     st.button("🔄", key="next_page", on_click=advance_carousel, help="Показать другие примеры")
 
@@ -347,16 +349,16 @@ for i, entry in enumerate(st.session_state.chat_history):
         if summary:
             assistant_msg.text(summary)
 
-# --- Обработка нового вопроса ---
+# --- Processing a new question ---
 my_question = st.session_state.get("my_question", None)
 
 if my_question:
     st.chat_message("user").write(my_question)
 
     try:
-        logging.info(f"Новый вопрос: {my_question}")
+        logging.info(f"New question: {my_question}")
 
-        # Сбор контекста из истории
+        # Collecting context from a story
         def df_to_string(df):
             if df is None or df.empty:
                 return "No data"
@@ -373,23 +375,33 @@ if my_question:
         context_text = "\n\n".join(context_parts)
         full_question = f"{context_text}\n\nQ: {my_question}" if context_text else my_question
 
-        # Генерация SQL
+        # SQL Generation
         sql = generate_sql_cached(question=full_question)
-        logging.info(f"Сгенерированный SQL: {sql}")
+        logging.info(f"Generated SQL: {sql}")
 
-        if not sql or not is_sql_valid_cached(sql=sql):
-            logging.error("Сгенерированный SQL некорректен")
-            st.chat_message("assistant", avatar=avatar_url).error("Generated SQL is invalid.")
+
+        if not sql or not is_sql_valid_cached(sql):
+            logging.error("Generated SQL is incorrect.")
+            st.chat_message("assistant", avatar=avatar_url).error("Сгенерированный SQL некорректен.")
             st.stop()
+        elif is_sql_injection(sql):
+            logging.warning(f"Rejected SQL query due to suspected injection: {sql}")
+            st.chat_message("assistant", avatar=avatar_url).error("Запрос отклонён системой безопасности из-за подозрения на SQL-инъекцию.")
+            st.stop()
+        # Running SQL
+        else:
+            logging.info(f"The generated SQL does not contain injections.")
+            logging.info(f"is_sql_injection(sql): %s",is_sql_injection(sql))
+            df = run_sql_cached(sql=sql)
+            logging.info(f"The SQL query was executed successfully. Number of rows: {len(df)}")
 
-        # Запуск SQL
-        df = run_sql_cached(sql=sql)
-        logging.info(f"Успешно выполнен SQL-запрос. Кол-во строк: {len(df)}")
+        
+        
 
-        # Сохраняем DataFrame
+        # Save DataFrame
         st.session_state["df"] = df
 
-        # Генерация plotly-кода и графика
+        # Plotly code and graph generation
         plotly_code = None
         fig = None
         if st.session_state.get("show_chart", True) and should_generate_chart_cached(question=my_question, sql=sql, df=df):
@@ -402,7 +414,7 @@ if my_question:
         if st.session_state.get("show_summary", True):
             summary = generate_summary_cached(question=my_question + " (ответь на русском языке)", df=df)
 
-        # Сохраняем в историю
+        # Save to history
         st.session_state.chat_history.append({
             "question": my_question,
             "sql": sql,
@@ -412,7 +424,7 @@ if my_question:
             "fig": fig
         })
 
-        # Отображение ответа сразу
+        # Displaying the response immediately
         assistant_msg = st.chat_message("assistant", avatar=avatar_url)
 
         if st.session_state.get("show_sql", True):
@@ -441,8 +453,8 @@ if my_question:
 
     except Exception as e:
         error_trace = traceback.format_exc()
-        logging.error(f"Ошибка при обработке запроса: {str(e)}\n{error_trace}")
-        st.chat_message("assistant", avatar=avatar_url).error("⚠️ Произошла ошибка при обработке запроса.")
+        logging.error(f"Request processing error: {str(e)}\n{error_trace}")
+        st.chat_message("assistant", avatar=avatar_url).error("Произошла ошибка при обработке запроса.")
 
 
 if ENABLE_LOG_DOWNLOAD:

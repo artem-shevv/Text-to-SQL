@@ -1,10 +1,9 @@
 import streamlit as st
-from vanna.openai import OpenAI_Chat # type: ignore
-from vanna.vannadb import VannaDB_VectorStore # type: ignore
+from vanna.openai import OpenAI_Chat            # type: ignore
+from vanna.vannadb import VannaDB_VectorStore   # type: ignore
 
 class MyVanna(VannaDB_VectorStore, OpenAI_Chat):
     def __init__(self):
-        # Инициализация с использованием st.secrets
         VannaDB_VectorStore.__init__(
             self,
             vanna_model="vanna_performance_set_questions",
@@ -17,23 +16,18 @@ class MyVanna(VannaDB_VectorStore, OpenAI_Chat):
                 "model": "gpt-4o-mini"  
             }
         )
-
-    def get_top_training_matches(self, question, top_k=1):
-        # Используем метод get_similar_question_sql для получения похожих запросов
-        similar_questions = self.get_similar_question_sql(question, top_k=top_k)
-        return similar_questions
     
 @st.cache_resource(ttl=3600)
 def setup_vanna():
     vn = MyVanna()
-    # Подключение к PostgreSQL через секреты
+    
     vn.connect_to_postgres(
         host=st.secrets.postgres["host"],  
         dbname=st.secrets.postgres["dbname"],
         user=st.secrets.postgres["user"],
         password=st.secrets.postgres["password"],
         port=st.secrets.postgres["port"],
-        sslmode="require",  # Обязательно для Supabase
+        sslmode="require",  
         connect_timeout=5  
     )
     return vn
