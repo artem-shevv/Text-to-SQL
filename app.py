@@ -1,23 +1,38 @@
-import random
 import logging
 import traceback
-import os
 import streamlit as st
+from auth_module import show_login_form
 from vanna_calls import (
-    generate_questions_cached,
     generate_sql_cached,
-    run_sql_cached,
+    generate_summary_cached,
     generate_plotly_code_cached,
     generate_plot_cached,
     should_generate_chart_cached,
     is_sql_valid_cached,
-    generate_summary_cached
+    run_sql_cached
 )
 from checker_injection_calls import (
     is_sql_injection
 )
+from additional_functions import (
+    show_suggested_questions,
+    df_to_string,
+    get_name_role,
+    get_role_specific_questions,
+    avatar_url
+)
 
-avatar_url = "https://vanna.ai/img/vanna.svg"
+
+# Check auth
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+    st.session_state["user"] = None 
+
+if not st.session_state["authenticated"]:
+    from auth_module import show_login_form
+    show_login_form()
+    st.stop()
+
 
 st.set_page_config(layout="wide")
 
@@ -27,9 +42,7 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-ENABLE_LOG_DOWNLOAD =  False#True
-
-# --- Custom responsive styles ---
+# Mobile view 
 st.markdown("""
     <style>
         html, body, [class*="css"] {
@@ -81,15 +94,33 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- Sidebar settings ---
+# Sidebar settings 
 st.sidebar.title("Output Settings")
+
+# Add info about user
+st.sidebar.markdown("---")
+st.sidebar.markdown("### Информация о пользователе")
+
+# Get true role, id
+true_role = get_name_role(st.session_state.user['role'])
+user_id = st.session_state.user["original_id"]
+
+# Show info for personal role
+if st.session_state.user["role"] == "student":
+    st.sidebar.markdown(f"**Роль:** {true_role}\n\n📚 **Номер:** {user_id}")
+elif st.session_state.user["role"] == "teacher":
+    st.sidebar.markdown(f"**Роль:** {true_role}\n\n📝 **Номер:** {user_id}")
+else:
+    st.sidebar.markdown(f"**Роль:** {true_role}\n\n🔑 **Номер:** {user_id}")
+
+st.sidebar.markdown("---")
 st.sidebar.checkbox("Show SQL", value=True, key="show_sql")
 st.sidebar.checkbox("Show Table", value=True, key="show_table")
 st.sidebar.checkbox("Show Plotly Code", value=True, key="show_plotly_code")
 st.sidebar.checkbox("Show Chart", value=True, key="show_chart")
 st.sidebar.checkbox("Show Summary", value=True, key="show_summary")
 
-# --- Initialize default settings if not set ---
+# Initialize default settings if not set 
 for key, default in {
     "show_sql": True,
     "show_table": True,
@@ -100,200 +131,37 @@ for key, default in {
     if key not in st.session_state:
         st.session_state[key] = default
 
-# --- Reset chat ---
+# Reset chat 
 if st.sidebar.button("Reset Chat", use_container_width=True):
     st.session_state.pop("chat_history", None)
     st.session_state.pop("my_question", None)
     st.session_state.pop("df", None)
     st.session_state.pop("user_input", None)  
-    st.session_state.pop("last_user_id", None)  # Reset last user ID
+    st.session_state.pop("last_user_id", None)
 
-# --- Init chat history ---
+# Init chat history 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
 if "show_suggestions" not in st.session_state:
     st.session_state["show_suggestions"] = False
 
-# --- Suggested Questions ---
-def set_question(question):
-    st.session_state["my_question"] = question
-    st.session_state["df"] = None
+st.title("AI assistant")
 
-st.title("Vanna AI")
-
-# --- Neutral questions ---
-NEUTRAL_QUESTIONS = [
-    "Сколько всего студентов обучается?",
-    "Сколько преподавателей работает в институте?",
-    "Сколько всего групп?",
-    "Сколько групп на каждом курсе?",
-    "Какие дисциплины ведёт каждый преподаватель?",
-    "Сколько студентов обучается на каждой специальности?"
-]
-
-# --- Check for ID input based on keywords ---
-def check_for_id_input(user_input):
-    keywords = ["студент", "преподаватель", "учитель", "администратор"]
-    if any(keyword in user_input.lower() for keyword in keywords) and any(c.isdigit() for c in user_input):
-        return True
-    return False
-
-# --- Defining a role based on user input ---
-def get_user_role(user_input):
-    roles = {
-        "студент": ["студент", "ученик"],
-        "преподаватель": ["преподаватель", "учитель", "педагог"],
-        "администратор": ["администратор"]
-    }
-
-    if any(c.isdigit() for c in user_input):
-        lower_input = user_input.lower()
-        for role, keywords in roles.items():
-            if any(keyword in lower_input for keyword in keywords):
-                return role
-    return None
-
-# --- Categorization of generated questions ---
-def categorize_questions(questions):
-    categorized = {
-        "student": [],
-        "teacher": [],
-        "admin": [],
-        "neutral": []
-    }
-
-    for q in questions:
-        q_clean = q.strip()
-        if q_clean.endswith("Я студент"):
-            categorized["student"].append(q)
-        elif q_clean.endswith("Я преподаватель"):
-            categorized["teacher"].append(q)
-        elif "Я студент" in q_clean or "Я преподаватель" in q_clean:
-            continue
-        elif "Я администратор" in q_clean:
-            categorized["admin"].append(q)
-        else:
-            categorized["neutral"].append(q)
-
-    return categorized
-
-# --- Clearing the end of the question ---
-def clean_question_text(q):
-    if not isinstance(q, str):
-        return ""
-
-    split_chars = ['?', '.']
-    min_index = min([q.find(c) for c in split_chars if c in q] + [len(q)])
-
-    cleaned = q[:min_index + 1] if min_index < len(q) else q
-    return cleaned.strip()
-
-# --- Displaying recommended questions ---
-def show_suggested_questions():
-    if "show_suggestions" not in st.session_state:
-        st.session_state["show_suggestions"] = False
-
-    assistant_message_suggested = st.chat_message("assistant", avatar=avatar_url)
-    if assistant_message_suggested.button("Click to show suggested questions"):
-        st.session_state["show_suggestions"] = not st.session_state["show_suggestions"]
-        st.session_state["my_question"] = None
-
-    if st.session_state["show_suggestions"]:
-        user_input = st.session_state.get("user_input", "")
-        user_role = get_user_role(user_input)
-
-        if user_role:
-            all_questions = generate_questions_cached()
-            categorized = categorize_questions(all_questions)
-
-            max_total = 6
-            n_personal = random.randint(2, max_total - 2)
-            n_neutral = max_total - n_personal
-
-            role_map = {
-                "студент": "student",
-                "преподаватель": "teacher",
-                "администратор": "admin"
-            }
-
-            role_key = role_map.get(user_role, "neutral")
-
-            if user_role == "администратор":
-                # Only show neutral questions for the administrator
-                selected_questions = categorized.get("neutral", [])[:n_neutral]
-            else:
-                # For other roles, we combine personalized and neutral questions
-                personalized = categorized.get(role_key, [])[:n_personal]
-                neutrals = categorized.get("neutral", [])[:n_neutral]
-                selected_questions = personalized + neutrals
-
-            random.shuffle(selected_questions)
-        else:
-            selected_questions = NEUTRAL_QUESTIONS
-
-        # Clearing issues for display only
-        for i, question in enumerate(selected_questions):
-            short_q = clean_question_text(question)
-            st.button(short_q, on_click=set_question, args=(short_q,), key=f"suggested_q_{i}")
-
-# --- Chat Input ---
+# Chat Input 
 st.markdown("### Тестовые запросы:")
 
-# List of all test queries
-test_questions = [
-    "🎓 Я студент 11111-222, когда у меня день рождения?",
-    "Я студент 11112-222, кто староста моей группы?",
-    "Я студент 11113-222, что я изучу за время учёбы на этом направлении подготовки?",
-    "👨‍🏫 Я преподаватель 62-180-5657, какие дисциплины я преподаю?",
-    "Я преподаватель 62-180-5657, сколько студентов я обучаю?",
-    "Я преподаватель 62-180-5657, какой у меня номер телефона?",
-    "🧑‍💼 Я администратор 08-731-2673, сколько студентов обучается на каждой специальности?",
-    "Я администратор 08-731-2673, какие дисциплины ведёт каждый преподаватель?",
-    "Я администратор 08-731-2673, сколько преподавателей работает в институте?"
-]
+user_role = st.session_state.user["role"]
+questions = get_role_specific_questions(user_role)
 
-# Page status
-if "test_question_page" not in st.session_state:
-    st.session_state["test_question_page"] = 0
-
-# Flag for pressing the switch
-if "carousel_advance" not in st.session_state:
-    st.session_state["carousel_advance"] = False
-
-# Handling the switch button press
-def advance_carousel():
-    st.session_state["test_question_page"] = (st.session_state["test_question_page"] + 1) % (len(test_questions) // 3)
-    st.session_state["carousel_advance"] = True
-
-    # Clearing the history and context of the model
-    st.session_state.pop("chat_history", None)
-    st.session_state.pop("my_question", None)
-    st.session_state.pop("df", None)
-    st.session_state.pop("user_input", None)
-
-# Button interface
-start_index = st.session_state["test_question_page"] * 3
-current_questions = test_questions[start_index:start_index + 3]
-
-cols = st.columns([4, 4, 4, 1])  
-
-# Main buttons
-for i, col in enumerate(cols[:3]):
-    if i < len(current_questions):
-        q = current_questions[i]
+cols = st.columns(3)
+for i, col in enumerate(cols):
+    if i < len(questions):
         with col:
-            if st.button(q, key=f"question_button_{start_index + i}"):
-                st.session_state["my_question"] = q
+            if st.button(questions[i], key=f"test_question_{i}"):
+                st.session_state["my_question"] = questions[i]
                 st.session_state["df"] = None
-                st.session_state["user_input"] = q
-                # Сброс флага переключения
-                st.session_state["carousel_advance"] = False
-
-# Page switching button
-with cols[3]:
-    st.button("🔄", key="next_page", on_click=advance_carousel, help="Показать другие примеры")
-
+                st.session_state["user_input"] = questions[i]
 
 new_question = st.chat_input("Задайте вопрос о ваших данных")
 
@@ -303,7 +171,7 @@ if new_question:
     # Store user input for future checks
     st.session_state["user_input"] = new_question
 
-# --- Render chat history ---
+# Render chat history 
 for i, entry in enumerate(st.session_state.chat_history):
     st.chat_message("user").write(entry["question"])
     assistant_msg = st.chat_message("assistant", avatar=avatar_url)
@@ -349,7 +217,7 @@ for i, entry in enumerate(st.session_state.chat_history):
         if summary:
             assistant_msg.text(summary)
 
-# --- Processing a new question ---
+# Processing a new question 
 my_question = st.session_state.get("my_question", None)
 
 if my_question:
@@ -357,12 +225,6 @@ if my_question:
 
     try:
         logging.info(f"New question: {my_question}")
-
-        # Collecting context from a story
-        def df_to_string(df):
-            if df is None or df.empty:
-                return "No data"
-            return df.head(5).to_csv(index=False)
 
         recent_context = st.session_state.chat_history[-5:]
         context_parts = []
@@ -372,8 +234,16 @@ if my_question:
                 part += f"\nDATA:\n{df_to_string(entry['df'])}"
             context_parts.append(part)
 
-        context_text = "\n\n".join(context_parts)
-        full_question = f"{context_text}\n\nQ: {my_question}" if context_text else my_question
+        user_info = f"Я {true_role} {st.session_state.user['original_id']}"
+
+        if not st.session_state.chat_history:
+            full_question = f"{user_info}\n\nQ: {my_question}"
+        else:
+            last_entry = st.session_state.chat_history[-1]
+            context_text = f"Предыдущий вопрос: {last_entry['question']}\nОтвет: {last_entry['summary']}"
+            full_question = f"{user_info}\n\n{context_text}\n\nНовый вопрос: {my_question}"
+
+        logging.info(f"Generated promt: {full_question}")
 
         # SQL Generation
         sql = generate_sql_cached(question=full_question)
@@ -395,9 +265,6 @@ if my_question:
             df = run_sql_cached(sql=sql)
             logging.info(f"The SQL query was executed successfully. Number of rows: {len(df)}")
 
-        
-        
-
         # Save DataFrame
         st.session_state["df"] = df
 
@@ -415,6 +282,9 @@ if my_question:
             summary = generate_summary_cached(question=my_question + " (ответь на русском языке)", df=df)
 
         # Save to history
+        if len(st.session_state.chat_history) > 1:
+            st.session_state.chat_history = [st.session_state.chat_history[-1]]  # Save only last
+
         st.session_state.chat_history.append({
             "question": my_question,
             "sql": sql,
@@ -456,11 +326,5 @@ if my_question:
         logging.error(f"Request processing error: {str(e)}\n{error_trace}")
         st.chat_message("assistant", avatar=avatar_url).error("Произошла ошибка при обработке запроса.")
 
-
-if ENABLE_LOG_DOWNLOAD:
-    if os.path.exists("app.log"):
-        with open("app.log", "r") as f:
-            st.sidebar.download_button("Download log", f.read(), file_name="app.log", mime="text/plain", use_container_width=True)
-
-# --- Show suggested questions ---
+# Show suggested questions 
 show_suggested_questions()

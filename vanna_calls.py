@@ -16,21 +16,42 @@ class MyVanna(VannaDB_VectorStore, OpenAI_Chat):
                 "model": "gpt-4o-mini"  
             }
         )
+
+    def get_db_user(self, role: str) -> str:
+        role_to_db_user = {
+            "student": "user_student",
+            "teacher": "user_teacher",
+            "administrator": "user_admin"
+        }
+        return role_to_db_user.get(role.lower(), "user_student")
     
 @st.cache_resource(ttl=3600)
 def setup_vanna():
+    if "user" not in st.session_state:
+        st.error("Требуется авторизация")
+        st.stop()
+    
     vn = MyVanna()
     
-    vn.connect_to_postgres(
-        host=st.secrets.postgres["host"],  
-        dbname=st.secrets.postgres["dbname"],
-        user=st.secrets.postgres["user"],
-        password=st.secrets.postgres["password"],
-        port=st.secrets.postgres["port"],
-        sslmode="require",  
-        connect_timeout=5  
-    )
-    return vn
+    try:
+        db_user_key = vn.get_db_user(st.session_state.user["role"])
+        
+        vn.connect_to_postgres(
+            host=st.secrets.postgres["host"],  
+            dbname=st.secrets.postgres["dbname"],
+            user=st.secrets.postgres[db_user_key],
+            password=st.secrets.postgres["password"],
+            port=st.secrets.postgres["port"],
+            sslmode="require",
+            connect_timeout=5
+        )
+        return vn
+    except KeyError:
+        st.error("Неверная роль пользователя")
+        st.stop()
+    except Exception as e:
+        st.error(f"Ошибка подключения к БД: {str(e)}")
+        st.stop()
 
 @st.cache_data(show_spinner="Generating sample questions ...")
 def generate_questions_cached():
